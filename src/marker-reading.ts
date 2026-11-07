@@ -108,14 +108,21 @@ export function registerMarkerReading(plugin: Plugin, renderMarkdown: MarkerMark
 		for (const group of groups) {
 			const first = group.entries[0];
 			const last = group.entries[group.entries.length - 1];
-			if (!first || !last || first.info.lineStart > group.lineStart || last.info.lineEnd < group.lineEnd) continue;
-			// A missing nonblank section must never disappear when its neighbors finish rendering.
+			if (!first || !last) continue;
+			// Under virtual scrolling, only sections near the viewport are ever mounted.
+			// For marker syntax, the rendered output lives entirely in `host` (a new div),
+			// so we don't need every section to be present before rendering. We only need
+			// the first section (to anchor the host element) and enough coverage from the
+			// start of the block to where we have sections — the rest of the block source
+			// is passed to renderMarkdown in full regardless.
+			if (first.info.lineStart > group.lineStart) continue;
+			// Gap check only within the range we actually have sections for.
 			if (lines.some((line, index) => index >= first.info.lineStart && index <= last.info.lineEnd && line.trim() && !group.entries.some(({ info }) => info.lineStart <= index && info.lineEnd >= index))) continue;
 			const overlapping = [...current.renders].filter((render) => render.entries.some((entry) => group.entries.includes(entry)));
 			if (overlapping.some((render) => render.entries.length === group.entries.length && render.entries.every((entry) => group.entries.includes(entry)))) continue;
 			for (const render of overlapping) render.dispose();
 			const source = current.source;
-			const bounds = { text: source, lineStart: first.info.lineStart, lineEnd: last.info.lineEnd };
+			const bounds = { text: source, lineStart: group.lineStart, lineEnd: group.lineEnd };
 			const host = first.element.createDiv({ cls: "tabsdown-marker-reading" });
 			host.hidden = true;
 			const owner = first.owner.addChild(new MarkdownRenderChild(host));
