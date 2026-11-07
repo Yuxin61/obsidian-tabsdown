@@ -23,6 +23,7 @@ import {
 	trackSeparators,
 	type SeparatorTracker,
 } from "./separator";
+import type { TabsSyntax } from "./syntax";
 
 interface PanelState {
 	panelEl: HTMLElement;
@@ -112,6 +113,7 @@ export class TabBlockRenderChild extends MarkdownRenderChild {
 		private readonly options: TabsdownConfig = {},
 		private readonly editing?: BlockEditing,
 		private readonly hooks: TabRenderHooks = {},
+		private readonly syntax?: TabsSyntax,
 	) {
 		super(containerEl);
 		this.ready = new Promise((resolve) => { this.resolveReady = resolve; });
@@ -242,6 +244,7 @@ export class TabBlockRenderChild extends MarkdownRenderChild {
 					},
 					(trigger, save, index) => this.editLabel(trigger, save, index),
 					(trigger, save, index) => { void this.deleteTab(trigger, save, index); },
+					this.syntax === "htabs",
 				);
 		}
 		this.containerEl.append(tabList, panels);

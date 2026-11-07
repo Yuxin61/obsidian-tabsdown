@@ -29,9 +29,9 @@ export function isCompleteHtmlTag(line: string): boolean {
 }
 
 /** Authored Tabsdown delimiters. Offsets always address the supplied string. */
-export type TabsSyntax = "fenced" | "markers";
+export type TabsSyntax = "fenced" | "markers" | "htabs";
 export interface CommentMarker {
-	kind: "tabs" | "endtabs" | "tab" | "config";
+	kind: "tabs" | "endtabs" | "htabs" | "endhtabs" | "tab" | "config";
 	value: string;
 	from: number;
 	to: number;
@@ -41,16 +41,16 @@ export interface CommentMarker {
 }
 
 export function commentMarker(line: string): Omit<CommentMarker, "from" | "to" | "end"> | undefined {
-	const match = /^ {0,3}%%[ \t]*(tabs|endtabs|tab:|config:)(.*?)[ \t]*%%[ \t]*$/.exec(line);
+	const match = /^ {0,3}%%[ \t]*(tabs|endtabs|htabs|endhtabs|tab:|config:)(.*?)[ \t]*%%[ \t]*$/.exec(line);
 	if (!match) return undefined;
 	const name = match[1]!;
 	const tail = match[2]!;
-	if ((name === "tabs" || name === "endtabs") && tail.trim() !== "") return undefined;
+	if ((name === "tabs" || name === "endtabs" || name === "htabs" || name === "endhtabs") && tail.trim() !== "") return undefined;
 	const value = tail.trim();
 	const start = line.indexOf(name) + name.length;
 	const valueFrom = start + tail.length - tail.trimStart().length;
 	return {
-		kind: name === "tab:" ? "tab" : name === "config:" ? "config" : name as "tabs" | "endtabs",
+		kind: name === "tab:" ? "tab" : name === "config:" ? "config" : name as "tabs" | "endtabs" | "htabs" | "endhtabs",
 		value, valueFrom, valueTo: valueFrom + value.length,
 	};
 }
@@ -115,7 +115,7 @@ function indentColumns(text: string): number {
 function containedLayout(source: string, from: number, end: number, line: string): { markers: CommentMarker[]; end: number } | undefined {
 	const steps: ContainerStep[] = [];
 	let content = line;
-	while (commentMarker(content)?.kind !== "tabs") {
+	while (commentMarker(content)?.kind !== "tabs" && commentMarker(content)?.kind !== "htabs") {
 		const quote = /^ {0,3}>[ \t]?/.exec(content)?.[0];
 		const list = /^( {0,3}(?:[-+*]|\d{1,9}[.)]))([ \t]+)/.exec(content);
 		const listPrefix = list && indentColumns(list[0]) - indentColumns(list[1]!) <= 4 ? list[0] : undefined;
@@ -164,8 +164,8 @@ function containedLayout(source: string, from: number, end: number, line: string
 		const map = (offset: number) => row.from + row.offset + offset - row.projected;
 		markers.push({ ...marker, from: row.from, to: map(marker.to), end: row.end,
 			valueFrom: map(marker.valueFrom), valueTo: map(marker.valueTo) });
-		if (marker.kind === "tabs") depth += 1;
-		if (marker.kind === "endtabs" && --depth === 0) break;
+		if (marker.kind === "tabs" || marker.kind === "htabs") depth += 1;
+		if ((marker.kind === "endtabs" || marker.kind === "endhtabs") && --depth === 0) break;
 	}
 	return { markers, end: rows[rows.length - 1]!.end };
 }

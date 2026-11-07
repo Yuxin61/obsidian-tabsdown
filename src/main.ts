@@ -148,7 +148,7 @@ export default class TabsdownPlugin extends Plugin {
 
 		const renderFragment = async (
 			markdown: string, element: HTMLElement, context: MarkdownPostProcessorContext,
-			owner: Component, inline?: InlineEditing, exactLines = true,
+			owner: Component, inline?: InlineEditing, exactLines = true, hideConfigFields?: boolean,
 		): Promise<void> => {
 			const blocks = sourceBlocks(markdown, { fragment: true })
 				.filter((block) => block.locator.nestedOffsets.length === 0);
@@ -194,13 +194,14 @@ export default class TabsdownPlugin extends Plugin {
 						text: section.text, lineStart: section.lineStart + block.lineStart,
 						lineEnd: section.lineStart + block.lineEnd,
 					} : null,
-				}, block.syntax, inline, occurrence);
+				}, block.syntax, inline, occurrence, hideConfigFields);
 				if (child && !await child.ready) throw new Error("A Tabsdown panel could not be rendered.");
 			}
 		};
 		const renderBlock = (
 			source: string, element: HTMLElement, context: MarkdownPostProcessorContext,
 			syntax: TabsSyntax = "fenced", inline?: InlineEditing, nestedOccurrence?: number,
+			hideConfigFields?: boolean,
 		): TabBlockRenderChild | undefined => {
 			const renderedSection = context.getSectionInfo(element);
 			const file = this.app.vault.getAbstractFileByPath(context.sourcePath);
@@ -312,8 +313,10 @@ export default class TabsdownPlugin extends Plugin {
 					{
 						...projection?.hooks,
 						renderMarkdown: (markdown, target, component) => renderFragment(
-							markdown, target, context, component, inline, false),
+							markdown, target, context, component, inline, false,
+							syntax === "htabs" || hideConfigFields),
 					},
+					hideConfigFields ? "htabs" : syntax,
 			);
 			projection?.attach(child);
 			addRenderChild(child);

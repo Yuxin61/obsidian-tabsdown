@@ -98,6 +98,7 @@ export function addBlockSettingsContextMenu(
 	ownMenu: (menu: Menu) => void,
 	editLabel?: (trigger: HTMLElement, save: Promise<SaveBlockSettings>, index?: number) => void,
 	deleteTab?: (trigger: HTMLElement, save: Promise<SaveBlockSettings>, index: number) => void,
+	hideConfigFields?: boolean,
 ): void {
 	let pending = false;
 	register(parent, "contextmenu", (event) => {
@@ -139,9 +140,9 @@ export function addBlockSettingsContextMenu(
 						}));
 				}
 			}
-			menu.addSeparator();
+			if (!hideConfigFields) menu.addSeparator();
 		}
-		for (const [label, key, choices] of fields) {
+		if (!hideConfigFields) for (const [label, key, choices] of fields) {
 			const titles = new Map<string, string>(choices);
 			const values: [
 				readonly [string, string],

@@ -832,7 +832,7 @@ function directBlocks(view: SourceView, onEnd?: (line: SourceLine) => void): Fen
 				continue;
 			}
 		}
-		if (!commentTouched && onEnd && depth === 0 && containerIndent === 0 && commentMarker(content)?.kind === "endtabs") {
+		if (!commentTouched && onEnd && depth === 0 && containerIndent === 0 && (commentMarker(content)?.kind === "endtabs" || commentMarker(content)?.kind === "endhtabs")) {
 			onEnd(line);
 			break;
 		}
@@ -856,6 +856,36 @@ function directBlocks(view: SourceView, onEnd?: (line: SourceLine) => void): Fen
 					const closeEntry = sourceLines[closeLine];
 					if (closeEntry) {
 						result.push({ syntax: "markers", open: line.start,
+							inner: sliceView(projected, 0, close.start), innerRawFrom: view.rawTo[line.end] ?? -1,
+							innerRawTo: rawClose, closeEnd: closeEntry.end, prefix: insertionPrefix,
+							innerHasLine: line.end < closeEntry.start, closed: true });
+						index = closeLine;
+						paragraphOpen = false;
+						continue;
+					}
+				}
+			}
+			// An incomplete layout remains ordinary source and cannot own another block.
+			continue;
+		}
+		if (!commentTouched && commentMarker(content)?.kind === "htabs") {
+			let containerEnd = view.text.length;
+			for (const candidate of sourceLines.slice(index + 1)) {
+				if (leavesContainer(view.text.slice(candidate.start, candidate.contentEnd), depth, containerIndent, quoteIndent)) {
+					containerEnd = candidate.start;
+					break;
+				}
+			}
+			const projected = bodyView(view, line.end, containerEnd, depth, containerIndent, 0);
+			if (projected) {
+				let close: SourceLine | undefined;
+				directBlocks(projected, (line) => { close = line; });
+				if (close) {
+					const rawClose = projected.rawTo[close.start] ?? -1;
+					const closeLine = sourceLines.findIndex((candidate) => view.rawTo[candidate.start] === rawClose);
+					const closeEntry = sourceLines[closeLine];
+					if (closeEntry) {
+						result.push({ syntax: "htabs", open: line.start,
 							inner: sliceView(projected, 0, close.start), innerRawFrom: view.rawTo[line.end] ?? -1,
 							innerRawTo: rawClose, closeEnd: closeEntry.end, prefix: insertionPrefix,
 							innerHasLine: line.end < closeEntry.start, closed: true });
@@ -991,19 +1021,21 @@ function lineOffset(source: string, line: number): number {
 }
 
 function tabBodies(source: string, syntax: TabsSyntax = "fenced"): SourceRange[] {
+	if (syntax === "htabs") return [];
 	const markers = tabMarkers(source, syntax);
 	return markers.map((marker, index) => ({ from: marker.end, to: markers[index + 1]?.lineStart ?? source.length }));
 }
 
 function tabMarkers(source: string, syntax: TabsSyntax = "fenced"): TabMarker[] {
+	if (syntax === "htabs") return [];
 	const nestedRanges = directBlocks(createSourceView(source)).map((block) => ({ from: block.open, to: block.closeEnd }));
 	const controls = commentMarkers(source).filter((control) =>
 		!nestedRanges.some((range) => control.from >= range.from && control.from < range.to));
 	let depth = 0;
 	const commentTabs: TabMarker[] = [];
 	for (const control of controls) {
-		if (control.kind === "tabs") depth += 1;
-		if (control.kind === "endtabs" && depth > 0) depth -= 1;
+		if (control.kind === "tabs" || control.kind === "htabs") depth += 1;
+		if ((control.kind === "endtabs" || control.kind === "endhtabs") && depth > 0) depth -= 1;
 		else if (control.kind === "tab" && depth === 0) commentTabs.push({
 			from: control.valueFrom, to: control.valueTo, label: control.value, lineStart: control.from, end: control.end,
 		});
@@ -1013,8 +1045,8 @@ function tabMarkers(source: string, syntax: TabsSyntax = "fenced"): TabMarker[] 
 	let start = -1;
 	depth = 0;
 	for (const control of controls) {
-		if (control.kind === "tabs") { if (depth === 0) start = control.from; depth += 1; }
-		if (control.kind === "endtabs" && depth > 0 && --depth === 0) nestedMarkerRanges.push({ from: start, to: control.end });
+		if (control.kind === "tabs" || control.kind === "htabs") { if (depth === 0) start = control.from; depth += 1; }
+		if ((control.kind === "endtabs" || control.kind === "endhtabs") && depth > 0 && --depth === 0) nestedMarkerRanges.push({ from: start, to: control.end });
 	}
 	if (depth > 0) nestedMarkerRanges.push({ from: start, to: source.length });
 	const markers: TabMarker[] = [];
@@ -1081,6 +1113,7 @@ export function renderedSourceKey(source: string): string {
 }
 
 export function tabLabels(source: string, syntax: TabsSyntax = "fenced"): string[] {
+	if (syntax === "htabs") return htabMarkers(source).map((m) => source.slice(m.labelFrom, m.labelTo));
 	return tabMarkers(source, syntax).map(({ label }) => label);
 }
 
@@ -1122,12 +1155,114 @@ function sourceNewline(text: string, block: FenceBlock): string {
 		);
 }
 
+interface HtabMarker {
+	lineStart: number; // byte offset of heading line start in inner.text
+	lineEnd: number;   // byte offset just past heading line (after \n or end-of-text)
+	labelFrom: number; // byte offset of label start in inner.text
+	labelTo: number;   // byte offset of label end in inner.text
+	level: number;
+}
+
+function htabMarkers(innerText: string): HtabMarker[] {
+	const result: HtabMarker[] = [];
+	let rootLevel = -1;
+	let openFence: string | undefined;
+	let offset = 0;
+	for (const lineMatch of (innerText + "\n").matchAll(/[^\n]*\n/g)) {
+		const lineStart = offset;
+		const line = lineMatch[0];
+		const lineContent = line.endsWith("\n") ? line.slice(0, -1) : line;
+		const lineEnd = lineStart + line.length;
+		offset = lineEnd;
+
+		const fence = parseFenceLine(lineContent);
+		if (openFence) {
+			if (fence?.run.startsWith(openFence) && /^[ \t]*$/.test(fence.info)) openFence = undefined;
+			continue;
+		}
+		if (fence) { openFence = fence.run; continue; }
+
+		const headingMatch = /^( {0,3})(#{1,6})([ \t]+|$)(.*)$/.exec(lineContent);
+		if (!headingMatch) continue;
+		const level = headingMatch[2]!.length;
+		if (rootLevel < 0) rootLevel = level;
+		if (level !== rootLevel) continue;
+
+		const prefixLen = (headingMatch[1] ?? "").length + (headingMatch[2] ?? "").length + (headingMatch[3] ?? "").length;
+		const rawLabel = headingMatch[4] ?? "";
+		const trailingHash = /\s+#+\s*$/.exec(rawLabel);
+		const labelText = trailingHash ? rawLabel.slice(0, rawLabel.length - trailingHash[0].length) : rawLabel;
+		const trimmed = labelText.trim();
+		const leading = labelText.indexOf(trimmed);
+		result.push({
+			lineStart,
+			lineEnd,
+			labelFrom: lineStart + prefixLen + (leading < 0 ? rawLabel.length : leading),
+			labelTo: lineStart + prefixLen + (leading < 0 ? rawLabel.length : leading + trimmed.length),
+			level,
+		});
+	}
+	return result;
+}
+
+function rewriteHtabTab(text: string, block: FenceBlock, edit: TabEdit): SourceEdit {
+	const markers = htabMarkers(block.inner.text);
+	const tabCount = markers.length;
+
+	if (edit.type === "delete") {
+		const marker = markers[edit.index];
+		if (!marker) throw new SourceConflictError("The tab could not be located.");
+		if (tabCount <= 2) throw new SourceConflictError("A Tabsdown block must keep at least two tabs.");
+		const nextMarker = markers[edit.index + 1];
+		const logicalTo = nextMarker ? nextMarker.lineStart : block.inner.text.length;
+		const rawFrom = block.inner.rawFrom[marker.lineStart] ?? -1;
+		const rawTo = logicalTo < block.inner.text.length
+			? block.inner.rawFrom[logicalTo] ?? -1
+			: block.inner.rawTo[logicalTo] ?? -1;
+		return {
+			from: text.lastIndexOf("\n", rawFrom - 1) + 1,
+			to: logicalTo < block.inner.text.length
+				? text.lastIndexOf("\n", rawTo - 1) + 1
+				: rawTo,
+			replacement: "",
+		};
+	}
+
+	const label = editLabel(edit.label);
+	if (edit.type === "rename") {
+		const marker = markers[edit.index];
+		if (!marker) throw new SourceConflictError("The tab could not be located.");
+		return {
+			from: block.inner.rawFrom[marker.labelFrom] ?? -1,
+			to: block.inner.rawTo[marker.labelTo] ?? -1,
+			replacement: label,
+		};
+	}
+
+	// add: append a new heading + blank line + placeholder
+	const rootLevel = markers[0]?.level ?? 3;
+	const hashes = "#".repeat(rootLevel);
+	const placeholder = "Start something...";
+	const newline = sourceNewline(text, block);
+	const leading = block.inner.text === "" || block.inner.text.endsWith("\n") ? "" : newline;
+	const trailing = block.inner.text.endsWith("\n") || block.innerRawTo < text.length ? newline : "";
+	const insertion = `${leading}${hashes} ${label}${newline}${newline}${placeholder}${trailing}`;
+	validateTabs(block.inner.text + insertion, "htabs");
+	return {
+		from: block.innerRawTo,
+		to: block.innerRawTo,
+		replacement: insertion,
+	};
+}
 export function rewriteTab(
 	text: string,
 	snapshot: BlockSnapshot,
 	edit: TabEdit,
 ): SourceEdit {
 	const block = resolvedSnapshot(text, snapshot);
+
+	if (block.syntax === "htabs") return rewriteHtabTab(text, block, edit);
+
 	const markers = tabMarkers(block.inner.text, block.syntax);
 	if (edit.type === "delete") {
 		const marker = markers[edit.index];

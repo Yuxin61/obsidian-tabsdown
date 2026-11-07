@@ -93,7 +93,7 @@ export function registerMarkerReading(plugin: Plugin, renderMarkdown: MarkerMark
 	function reconcile(current: Coordinator, container: HTMLElement): void {
 		if (current.disposed) return;
 		const lines = current.source.match(/[^\n]*\n|[^\n]+$/g) ?? [];
-		const candidates = sourceBlocks(current.source).filter((block) => block.syntax === "markers" && block.locator.nestedOffsets.length === 0);
+		const candidates = sourceBlocks(current.source).filter((block) => (block.syntax === "markers" || block.syntax === "htabs") && block.locator.nestedOffsets.length === 0);
 		const sections = [...current.sections.values()].sort((a, b) => a.info.lineStart - b.info.lineStart);
 		const groups: Array<{ entries: Section[]; lineStart: number; lineEnd: number }> = [];
 		for (const candidate of candidates) {
@@ -207,7 +207,7 @@ export function registerMarkerReading(plugin: Plugin, renderMarkdown: MarkerMark
 		if (!info) return;
 		const container = element.closest<HTMLElement>(".markdown-preview-section") ?? element.parentElement;
 		if (!container) {
-			if (pending.has(element) || !sourceBlocks(info.text).some((block) => block.syntax === "markers" && block.locator.nestedOffsets.length === 0)) return;
+			if (pending.has(element) || !sourceBlocks(info.text).some((block) => (block.syntax === "markers" || block.syntax === "htabs") && block.locator.nestedOffsets.length === 0)) return;
 			const lifecycle = new MarkdownRenderChild(element);
 			context.addChild(lifecycle);
 			const observer = new MutationObserver(() => {
@@ -226,7 +226,7 @@ export function registerMarkerReading(plugin: Plugin, renderMarkdown: MarkerMark
 		const key = context.docId || context.sourcePath;
 		let current = documents.get(key);
 		if (!current || current.disposed) {
-			if (!sourceBlocks(info.text).some((block) => block.syntax === "markers" && block.locator.nestedOffsets.length === 0)) return;
+			if (!sourceBlocks(info.text).some((block) => (block.syntax === "markers" || block.syntax === "htabs") && block.locator.nestedOffsets.length === 0)) return;
 			current = {
 				source: info.text, sections: new Map(), renders: new Set(), footnotes: new Map(), disposed: false,
 				dispose() {

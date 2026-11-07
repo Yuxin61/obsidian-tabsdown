@@ -8,7 +8,6 @@ import {
 } from "./config";
 
 export type { TabConfiguration, TabsdownConfig } from "./config";
-
 export interface ParsedTab {
 	label: string;
 	body: string;
@@ -183,6 +182,7 @@ export function inlineLabelText(tokens: readonly InlineLabelToken[]): string {
 }
 
 export function parseTabs(source: string, syntax: TabsSyntax = "fenced"): TabsParseResult {
+	if (syntax === "htabs") return parseHeadingTabs(source);
 	const controls = commentMarkers(source);
 	const markers = new Map(controls.map((marker) => [source.slice(0, marker.from).split("\n").length, marker]));
 	let markerDepth = 0;
@@ -364,4 +364,144 @@ export function parseTabs(source: string, syntax: TabsSyntax = "fenced"): TabsPa
 		...(configuration.length > 0 ? { configuration } : {}),
 		...(Object.keys(options).length > 0 ? { options } : {}),
 	};
+}
+
+const atxHeadingLine = /^( {0,3})(#{1,6})(?:[ \t]+|$)(.*?)(?:[ \t]+#+[ \t]*)?$/;
+
+interface HeadingEntry {
+	level: number;
+	label: string;
+	lineIndex: number;
+}
+
+function scanHeadings(sourceLines: string[]): { headings: HeadingEntry[]; fenceRanges: Array<[number, number]> } {
+	const headings: HeadingEntry[] = [];
+	const fenceRanges: Array<[number, number]> = [];
+	let openFence: string | undefined;
+	let fenceStart = 0;
+	for (const [index, line] of sourceLines.entries()) {
+		const fence = parseFenceLine(line);
+		if (openFence) {
+			if (fence && fence.run.startsWith(openFence) && /^[ \t]*$/.test(fence.info)) {
+				fenceRanges.push([fenceStart, index]);
+				openFence = undefined;
+			}
+			continue;
+		}
+		if (fence) {
+			openFence = fence.run;
+			fenceStart = index;
+			continue;
+		}
+		const heading = atxHeadingLine.exec(line);
+		if (heading) {
+			headings.push({ level: heading[2]!.length, label: heading[3]!.trim(), lineIndex: index });
+		}
+	}
+	if (openFence) fenceRanges.push([fenceStart, sourceLines.length - 1]);
+	return { headings, fenceRanges };
+}
+
+function isInFence(lineIndex: number, fenceRanges: Array<[number, number]>): boolean {
+	return fenceRanges.some(([start, end]) => lineIndex > start && lineIndex <= end);
+}
+
+interface HeadingTabGroup {
+	label: string;
+	startLine: number;
+	endLine: number;
+	children: HeadingTabGroup[];
+	rootLevel: number;
+}
+
+function buildTabGroups(
+	headings: HeadingEntry[],
+	fenceRanges: Array<[number, number]>,
+	totalLines: number,
+	rootLevel: number,
+): HeadingTabGroup[] | undefined {
+	const groups: HeadingTabGroup[] = [];
+	const visibleHeadings = headings.filter((h) => !isInFence(h.lineIndex, fenceRanges) && h.level >= rootLevel);
+	for (let i = 0; i < visibleHeadings.length; i++) {
+		const heading = visibleHeadings[i]!;
+		if (heading.level !== rootLevel) continue;
+		const nextSameLevel = visibleHeadings.slice(i + 1).find((h) => h.level === rootLevel);
+		const endLine = nextSameLevel ? nextSameLevel.lineIndex - 1 : totalLines - 1;
+		const subHeadings = visibleHeadings.slice(i + 1).filter(
+			(h) => h.lineIndex <= endLine && h.level > rootLevel
+		);
+		const firstSubLevel = subHeadings.find((h) => !isInFence(h.lineIndex, fenceRanges))?.level;
+		const children = firstSubLevel
+			? buildTabGroups(subHeadings, fenceRanges, endLine + 1, firstSubLevel) ?? []
+			: [];
+		groups.push({ label: heading.label, startLine: heading.lineIndex, endLine, children, rootLevel });
+	}
+	return groups.length > 0 ? groups : undefined;
+}
+
+function groupsToTabs(
+	groups: HeadingTabGroup[],
+	sourceLines: string[],
+): ParsedTab[] {
+	return groups.map((group) => {
+		if (group.children.length === 0) {
+			const bodyLines = sourceLines.slice(group.startLine + 1, group.endLine + 1);
+			const body = bodyLines.join("\n").trimEnd();
+			return { label: group.label, body: body ? body + "\n" : "" };
+		}
+		// Content before first child heading
+		const firstChildLine = group.children[0]!.startLine;
+		const prefixLines = sourceLines.slice(group.startLine + 1, firstChildLine);
+		const prefix = prefixLines.join("\n").trimEnd();
+		const childTabs = groupsToTabs(group.children, sourceLines);
+		const innerLines = childTabs.map((tab) => `%% tab: ${tab.label} %%\n${tab.body}`).join("");
+		const nested = "%% tabs %%\n" + innerLines + "%% endtabs %%";
+		const body = (prefix ? prefix + "\n\n" : "") + nested + "\n";
+		return { label: group.label, body };
+	});
+}
+
+function parseHeadingTabs(source: string): TabsParseResult {
+	const fail = (code: TabsDiagnosticCode, message: string, line: number): TabsParseResult => ({
+		ok: false,
+		diagnostic: { code, message, line, source },
+	});
+
+	const rawLines = source.split("\n");
+	// Remove trailing empty line if source ends with \n
+	const sourceLines = rawLines[rawLines.length - 1] === "" ? rawLines.slice(0, -1) : rawLines;
+
+	const { headings, fenceRanges } = scanHeadings(sourceLines);
+	const visibleHeadings = headings.filter((h) => !isInFence(h.lineIndex, fenceRanges));
+
+	if (visibleHeadings.length === 0) {
+		return fail("too-few-tabs", "A tabs block must contain at least two tabs.", 1);
+	}
+
+	// Check for content before first heading
+	const firstHeadingLine = visibleHeadings[0]!.lineIndex;
+	for (let i = 0; i < firstHeadingLine; i++) {
+		if ((sourceLines[i] ?? "").trim() !== "") {
+			return fail("content-before-first-tab", "Content before the first tab marker is not allowed.", i + 1);
+		}
+	}
+
+	const rootLevel = visibleHeadings[0]!.level;
+	const groups = buildTabGroups(visibleHeadings, fenceRanges, sourceLines.length, rootLevel);
+
+	if (!groups || groups.length < 2) {
+		return fail("too-few-tabs", "A tabs block must contain at least two tabs.", 1);
+	}
+
+	// Check for duplicate labels at root level
+	const rootLabels = new Set<string>();
+	for (const group of groups) {
+		if (rootLabels.has(group.label)) {
+			return fail("duplicate-label", `Duplicate tab label "${group.label}".`, group.startLine + 1);
+		}
+		rootLabels.add(group.label);
+	}
+
+	const tabs = groupsToTabs(groups, sourceLines);
+	return { ok: true, tabs };
 }
