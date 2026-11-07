@@ -34,6 +34,19 @@ Read the summary here.
 
 Keep each marker on its own line and give every tab a unique, non-empty label. A layout needs at least two tabs. Open Reading View to read it, or use Live Preview to read and edit it.
 
+Or use the heading-based syntax, which reads naturally even without the plugin:
+
+```markdown
+%% htabs %%
+### Overview
+Read the summary here.
+
+### Checklist
+- [ ] Review the details
+- [ ] Update this note
+%% endhtabs %%
+```
+
 <details>
 <summary>Watch Tabsdown in Obsidian</summary>
 
@@ -50,11 +63,11 @@ Click the active body, or focus its tab and press Down, to edit its Markdown. Ar
 
 The active body uses a plain Markdown editor, without Obsidian’s rich Live Preview or third-party suggestions. Incomplete layout syntax may reveal the note’s source. If the same note is open in multiple editing panes, close the extra editor before editing a tab.
 
-Right-click a block to **Add tab**. Double-click a label to rename it; Enter saves and Escape cancels. **Delete tab** is in the tab’s context menu, requires confirmation, and is disabled when only two tabs remain.
+Right-click a block to **Add tab**. In marker and fenced layouts, **Add tab** appends a new `%% tab: %%` marker; in htabs layouts it appends a new heading at the same level followed by a blank line. Double-click a label to rename it; Enter saves and Escape cancels. **Delete tab** is in the tab’s context menu, requires confirmation, and is disabled when only two tabs remain.
 
 ## Configuration
 
-Use the block’s context menu for position, overflow, density, personality, palette, and alignment. To keep those settings in the source, put `%% config: position=left, personality=rail %%` before the first tab. [Style Settings](docs/style-settings.md) supplies global defaults.
+Use the block’s context menu for position, overflow, density, personality, palette, and alignment. To keep those settings in the source, put `%% config: position=left, personality=rail %%` before the first tab. [Style Settings](docs/style-settings.md) supplies global defaults. `%% htabs %%` blocks do not support per-block configuration; use Style Settings for global defaults instead.
 
 Labels support bold, italic, strikethrough, inline code, and bundled Lucide icons, such as `%% tab: icon:code Python %%`. Other label Markdown stays literal.
 
@@ -74,6 +87,28 @@ tab: Checklist
 ````
 
 Keep `tab:` and optional `config:` lines at column zero. Use matching backtick or tilde fences and make the outer fence longer than any matching fences inside it. Source Mode exposes the complete layout syntax.
+
+For a heading-based layout, use `%% htabs %% / %% endhtabs %%` with ATX headings:
+
+```markdown
+%% htabs %%
+### Tab one
+
+Content here.
+
+### Tab two
+
+#### Nested A
+
+Deeper content.
+
+#### Nested B
+
+More content.
+%% endhtabs %%
+```
+
+The first heading sets the root level; all headings at that level become sibling tabs. Deeper headings become nested tabs rendered as a standard marker layout. No content is allowed before the first heading. `%% config: %%` lines have no effect inside an htabs block.
 
 ## Guides
 

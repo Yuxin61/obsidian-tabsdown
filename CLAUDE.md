@@ -22,17 +22,20 @@ npx vitest run tests/parser.test.ts
 
 ## Architecture
 
-This is an **Obsidian plugin** (`Plugin` subclass in `src/main.ts`) that renders tabbed content from Markdown source. Two source syntaxes are supported:
+This is an **Obsidian plugin** (`Plugin` subclass in `src/main.ts`) that renders tabbed content from Markdown source. Three source syntaxes are supported:
 
 - **Fenced**: ` ```tabsdown ... ``` ` code blocks
 - **Markers**: `%% tabs %%` / `%% tab: Label %%` / `%% endtabs %%` Obsidian comment blocks
+- **Htabs**: `%% htabs %%` / `%% endhtabs %%` — ATX headings define tab structure; no `%% tab: %%` lines needed. The first heading's level is the root level; same-level headings are sibling tabs, deeper headings become nested tabs (serialised as markers blocks internally). No config options apply; the context menu shows Add / Rename / Delete only.
 
 ### Data flow
 
 ```
 Markdown source
   └─ src/syntax.ts        — commentMarkers(): finds %% markers outside literal contexts
-  └─ src/parser.ts        — parseTabs(): produces ParsedTab[] + TabsdownConfig from source text
+  └─ src/parser.ts        — parseTabs(): produces ParsedTab[] + TabsdownConfig from source text;
+                             dispatches to parseHeadingTabs() for htabs syntax, which converts
+                             the heading hierarchy to ParsedTab[] (nested groups → markers blocks)
   └─ src/source.ts        — sourceBlocks(), locateBlock(), rewriteBlock(), rewriteTab()
                              Owns all source-level block location and editing logic.
                              BlockLocator (lineStart + nestedOffsets) identifies a block
@@ -51,21 +54,22 @@ Markdown source
 - **No private Obsidian APIs, no runtime dependencies**. Only Obsidian's public API and bundled CM6 packages (already external in esbuild).
 - **Production DOM uses `createEl`**. The exceptions are `src/label.ts` and `src/tabs.ts`, which must work outside Obsidian (for Quartz); tests use jsdom.
 - `LocatorRef` is an indirect reference resolved against live editor text, supporting nested blocks that don't have their own `getSectionInfo`.
+- **Htabs headings are the source of truth for tab identity**. `rewriteHtabTab()` edits heading lines directly; `htabMarkers()` locates root-level headings by byte offset in the inner view. Config-field submenus are suppressed for htabs and all their descendant blocks via `hideConfigFields` propagated through `renderFragment`.
 
 ### Source modules
 
 | File | Role |
 |---|---|
-| `src/syntax.ts` | Marker parsing + CommonMark-aware context detection (fences, HTML blocks, code spans) |
-| `src/parser.ts` | `parseTabs()` — text → typed result; `parseInlineLabel()` for label tokens |
+| `src/syntax.ts` | Marker parsing + CommonMark-aware context detection; `TabsSyntax` includes `"htabs"`; `CommentMarker.kind` includes `"htabs"` / `"endhtabs"` |
+| `src/parser.ts` | `parseTabs()` — text → typed result; dispatches to `parseHeadingTabs()` for htabs; `parseInlineLabel()` for label tokens |
 | `src/config.ts` | Config key/value types and parsing |
-| `src/source.ts` | Block location, snapshot, rewrite (all string-level operations) |
-| `src/render.ts` | `TabBlockRenderChild` — DOM construction, panel lifecycle, editing UI |
+| `src/source.ts` | Block location, snapshot, rewrite; `htabMarkers()` locates root headings by offset; `rewriteHtabTab()` handles htabs Add/Rename/Delete |
+| `src/render.ts` | `TabBlockRenderChild` — DOM construction, panel lifecycle, editing UI; accepts `syntax` to suppress config menus for htabs |
 | `src/tabs.ts` | `mountTabs()` — DOM-only tabs without Obsidian (used by Quartz plugin) |
 | `src/label.ts` | `renderLabel()` — renders inline label tokens to DOM; Quartz-compatible |
-| `src/marker-reading.ts` | Reading View coordinator for marker-syntax blocks |
+| `src/marker-reading.ts` | Reading View coordinator for marker-syntax and htabs blocks; relaxed coverage check for virtual scrolling |
 | `src/marker-editor.ts` | Live Preview CM6 extension for inline marker editing |
-| `src/block-settings.ts` | Context menu for block-level configuration |
+| `src/block-settings.ts` | Context menu for block-level configuration; `hideConfigFields` suppresses style submenus for htabs |
 | `src/panel-height.ts` | Tracks and animates panel height transitions |
 | `src/separator.ts` | Overflow separator visibility tracking |
 
