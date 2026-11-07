@@ -31,7 +31,7 @@ const context = await esbuild.context({
 	format: "cjs",
 	logLevel: "info",
 	minify: production,
-	outfile: "main.js",
+	outfile: "dist/main.js",
 	sourcemap: production ? false : "inline",
 	target: "es2021",
 	treeShaking: true,
