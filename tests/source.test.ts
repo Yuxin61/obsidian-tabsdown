@@ -1083,6 +1083,7 @@ describe("guarded tab edits", () => {
 		expect(tabEdit(text, rendered, { type: "add", label: "Three" })).toBe([
 			...lines.slice(0, -1),
 			">   tab: Three",
+			">   Start something...",
 			lines[lines.length - 1]!,
 		].join(newline));
 	});
@@ -1091,7 +1092,7 @@ describe("guarded tab edits", () => {
 		const rendered = "tab: One\nA\ntab: Two\nB";
 		const text = `~~~tabsdown\n${rendered}`;
 		expect(tabEdit(text, rendered, { type: "add", label: "Three" })).toBe(
-			`${text}\ntab: Three`,
+			`${text}\ntab: Three\nStart something...`,
 		);
 	});
 
@@ -1102,7 +1103,7 @@ describe("guarded tab edits", () => {
 			const body = rendered.replaceAll("\n", newline);
 			const text = `~~~tabsdown${newline}${body}`;
 			expect(tabEdit(text, rendered, { type: "add", label: "Three" })).toBe(
-				`${text}tab: Three${newline}`,
+				`${text}tab: Three${newline}Start something...${newline}`,
 			);
 		},
 	);

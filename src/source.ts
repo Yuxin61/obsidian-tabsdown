@@ -1174,7 +1174,8 @@ export function rewriteTab(
 		? logicalNewline
 		: "";
 	const markerText = block.syntax === "markers" ? `%% tab: ${label} %%` : `tab: ${label}`;
-	const insertion = `${leading}${markerText}${trailing}`;
+	const placeholder = "Start something...";
+	const insertion = `${leading}${markerText}\n${placeholder}${trailing}`;
 	validateTabs(block.inner.text + insertion, block.syntax);
 	const lastMarker = markers[markers.length - 1];
 	if (!lastMarker) throw new SourceConflictError("The tab could not be located.");
@@ -1185,7 +1186,7 @@ export function rewriteTab(
 	return {
 		from: block.innerRawTo,
 		to: block.innerRawTo,
-		replacement: `${leading ? newline : ""}${prefix}${markerText}${trailing ? newline : ""}`,
+		replacement: `${leading ? newline : ""}${prefix}${markerText}${newline}${prefix}${placeholder}${trailing ? newline : ""}`,
 	};
 }
 
